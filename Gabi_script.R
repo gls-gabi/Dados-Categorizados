@@ -166,7 +166,7 @@ df <- df.residual(modelo_semfosfatase) - df.residual(modelo_saturado)
 p_value <- pchisq(G2_value, df = df, lower.tail = FALSE)
 ## Não rejeitou h0, logo não há indicios de que o modelo sem fosfatase
 
-## Efeito do nível de fosfatase ácida na predição para envolvimento nodal ----
+## Efeito do nível de fosfatase ácida na predição para envolvimento nodal ----
 ## teste de WALD
 ## HO: Não há efeito de fosfatase acida
 ## H1: Há efeito de fosfatase acida
