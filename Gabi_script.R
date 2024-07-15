@@ -1,26 +1,26 @@
 # Modelagem ----
 
 ## Pacotes ----
-pacman::p_load(tidyverse, readxl,broom,aod)
+pacman::p_load(tidyverse, readxl,broom,aod,glmtoolbox,rms)
 
 ## Leitura das bases ----
 
 base_modelagem <- read_excel("Amostra_g04_Davi_GabrielaLobo_NataliaOliveira.xlsx") %>% 
-  rename_all(~ c("numero_identficacao", "resultado_radiografia", "estagio_tumor", "nivel_fostatase", "env_nodal")) 
+  rename_all(~ c("numero_identficacao", "resultado_radiografia", "estagio_tumor", "nivel_fosfatase", "env_nodal")) 
 
 full_size <- nrow(base_modelagem)
 n_cols <- ncol(base_modelagem)
 
 base_teste <- read_excel("Amostra_VALIDACAO.xlsx") %>% 
-  rename_all(~ c("numero_identficacao", "resultado_radiografia", "estagio_tumor", "nivel_fostatase", "env_nodal"))
+  rename_all(~ c("numero_identficacao", "resultado_radiografia", "estagio_tumor", "nivel_fosfatase", "env_nodal"))
 
 ## Teste de razao de verossimilhança ----
 # H0: modelo nulo é adequadro
 # H1: modelo saturado é adequado
 
 ### modelo completo/saturado 
-modelo_saturado <- glm(env_nodal~resultado_radiografia+estagio_tumor+nivel_fostatase, data = base_modelagem, family = "binomial")
-summary(modelo_completo)
+modelo_saturado <- glm(env_nodal~resultado_radiografia+estagio_tumor+nivel_fosfatase, data = base_modelagem, family = "binomial")
+summary(modelo_saturado)
 
 ## modelo somente com o intercepto 
 modelo_nulo <- glm(env_nodal~1, data=base_modelagem, family = "binomial")
@@ -166,14 +166,98 @@ df <- df.residual(modelo_semfosfatase) - df.residual(modelo_saturado)
 p_value <- pchisq(G2_value, df = df, lower.tail = FALSE)
 ## Não rejeitou h0, logo não há indicios de que o modelo sem fosfatase
 
-## Efeito do nível de fosfatase ácida na predição para envolvimento nodal ----
+## Efeito do nível de fosfatase ácida na predição para envolvimento nodal ----
 ## teste de WALD
 ## HO: Não há efeito de fosfatase acida
 ## H1: Há efeito de fosfatase acida
 
 wald_result <- wald.test(b = coef(modelo_saturado), Sigma = vcov(modelo_saturado), Terms = 4)
+
 ## não rejeitou ho, logo não há indicios de que há efeito do nivel de fosfatase no modelo
 ## faço um intervalo de confianca??
 
 ## Analise de residuos ----
 ## vou fazer a analise de residuos do modelo sem fosfatase!!! Mas podemos mudar depois
+
+selected_index <- which.min(model_info_to_plot[["AIC"]])
+selected_model <- all_models[[selected_index]]
+s_model_threshold <- model_info_to_plot[selected_index, "round_threshold"]
+pred_train <- as.numeric(fitted(selected_model) >= s_model_threshold)
+pred_test <- as.numeric(predict(selected_model, base_teste, type = "response") >= s_model_threshold)
+
+bin_res <- arm::binned.resids(
+  fitted(selected_model), 
+  residuals(selected_model, type = "response"), 
+  nclass = 8)$binned %>% 
+  cbind("n_class" = 8) %>%
+  rbind(cbind(
+    arm::binned.resids(
+      fitted(selected_model), 
+      residuals(selected_model, type = "response"), 
+      nclass = 15)$binned,
+    "n_class" = 15
+  )) %>%
+  as.data.frame()
+
+ggplot(data = bin_res) +
+    geom_point(aes(x = `xbar`, y = `ybar`, colour = "Resíduo Médio"), size = 5) +
+    geom_line(aes(x = `xbar`, y = `2se`, colour = "Tolerância"), linewidth = 2) +
+    geom_line(aes(x = `xbar`, y = -`2se`, colour = "Tolerância"), linewidth = 2) +
+    scale_color_manual(name = "", values = c("Resíduo Médio" = "black", "Tolerância" = "steelblue")) +
+    facet_wrap(vars(n_class), ncol=1, labeller = labeller(n_class = 
+                                                            c(
+                                                              "8" = "8 Agrupamentos",
+                                                              "15" = "15 Agrupamentos"
+                                                            )    
+    )) +
+    xlab("Valor Médio Predito") + ylab("Resíduo Médio") +
+    theme_bw()
+
+## Matriz de confusao ----
+conf_mat <- confusionMatrix(factor(pred_test), factor(base_teste$env_nodal), positive = "1")
+conf_mat$table
+conf_mat$byClass[c("Sensitivity", "Specificity")]
+
+## ROC ----
+plot.roc(
+  base_teste$env_nodal, predict(selected_model, base_teste, type = "response"),
+  percent=TRUE,
+  print.thres=c(s_model_threshold, 0.569),
+  col = "red",
+  print.auc = TRUE,
+  xlab = "Sensibilidade",
+  ylab = "Especificidade"
+) 
+dev.off()
+
+## Modelo selecionado ----
+summary(selected_model)$coefficients %>%
+  as.data.frame() %>%
+  rename_all(~c("Estimativa", "Erro Padrão", "Z", "p-valor"))
+
+
+## IC das estimativas ----
+coefs <- summary(selected_model)$coefficients %>% as.data.frame()
+low <- coefs[["Estimate"]] - qnorm(0.975)*coefs[["Std. Error"]]
+high <- coefs[["Estimate"]] + qnorm(0.975)*coefs[["Std. Error"]]
+
+coef_ic <- data.frame(
+  "Estimativa Pontual" = coefs[["Estimate"]],
+  "Limite Inferior" = low,
+  "Limite Superior" = high
+)
+
+rownames(coef_ic) <- rownames(coefs)
+
+exp(coef_ic)
+
+## Teste de Falta de Ajustamento ----
+## teste de Hosmer Lemeshow
+
+hl_out <- hltest(selected_model)
+pchisq(hl_out$statistic, 10 - length(selected_model$coefficients), lower.tail=F)
+## não rejeitou h0
+
+hl_out$hm %>%
+  rename_all(~c("Grupo", "Tamanho", "Observado", "Esperado"))
+
