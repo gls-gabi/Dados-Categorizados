@@ -6,13 +6,15 @@ pacman::p_load(tidyverse, readxl,broom,aod,glmtoolbox,rms)
 ## Leitura das bases ----
 
 base_modelagem <- read_excel("Amostra_g04_Davi_GabrielaLobo_NataliaOliveira.xlsx") %>% 
-  rename_all(~ c("numero_identficacao", "resultado_radiografia", "estagio_tumor", "nivel_fosfatase", "env_nodal")) 
+  rename_all(~ c("numero_identficacao", "resultado_radiografia", "estagio_tumor", "nivel_fosfatase", "env_nodal")) %>% 
+  select(!numero_identficacao)
 
 full_size <- nrow(base_modelagem)
 n_cols <- ncol(base_modelagem)
 
 base_teste <- read_excel("Amostra_VALIDACAO.xlsx") %>% 
-  rename_all(~ c("numero_identficacao", "resultado_radiografia", "estagio_tumor", "nivel_fosfatase", "env_nodal"))
+  rename_all(~ c("numero_identficacao", "resultado_radiografia", "estagio_tumor", "nivel_fosfatase", "env_nodal")) %>% 
+  select(!numero_identficacao)
 
 ## Teste de razao de verossimilhança ----
 # H0: modelo nulo é adequadro
@@ -53,9 +55,9 @@ model_matrix_metrics <- function(data, variable_matrix) {
 }
 
 ## nomes das variaveis explicativas
-covariables <- names(base_modelagem)[names(base_modelagem) != "env_nodal"]
+covariables <- names(base_modelagem)[names(base_modelagem) != c("env_nodal")]
 
-## 15 modelos
+## 7 modelos
 all_models <- map(
   1:(n_cols - 1),
   ~ model_matrix_metrics(
@@ -65,7 +67,9 @@ all_models <- map(
 ) %>%
   reduce(c)
 
-model_info_to_plot <- data.frame(matrix(ncol = 8, nrow = n_models)) %>%
+n_models <- length(all_models)
+
+model_info_to_plot <- data.frame(matrix(ncol = 10, nrow = n_models)) %>%
   rename_all(~ c(
     "Parametros", "n_parametros",
     "G^2", "g.l.", "p-valor",
@@ -135,14 +139,13 @@ ggplot(
 ) +
   geom_point(size = 5) +
   xlab("Quantidade de parâmetros") +
-  ylab("BIC") +
+  ylab("-2logL") +
   theme_bw()
 
 ### Modelos acima de 0.05 ----
 ## acima de 0.05
 model_info_to_plot %>%
-  select(-c(n_parametros, round_threshold, ACC)) %>%
-  filter(`p-valor` > 0.05)
+  select(-c(n_parametros, round_threshold, ACC))
 
 ## Como só ficaram dois modelos no final, vou fazer  o teste de razao de verossimlhança para ver a diferença
 # H0: modelo sem fosfatase é adequado
@@ -260,4 +263,3 @@ pchisq(hl_out$statistic, 10 - length(selected_model$coefficients), lower.tail=F)
 
 hl_out$hm %>%
   rename_all(~c("Grupo", "Tamanho", "Observado", "Esperado"))
-
